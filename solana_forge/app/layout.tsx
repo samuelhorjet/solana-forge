@@ -21,9 +21,9 @@ export const metadata: Metadata = {
   title: "SolanaForge - Professional Token Management",
   description: "Professional Solana DApp for token creation, swapping, and portfolio management",
    icons: {
-    icon: "/icon.jpeg", // This points to public/icon.png
-    shortcut: "/icon.jpeg",
-    apple: "/icon.jpeg",
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
   },
 }
 
