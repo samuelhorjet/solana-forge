@@ -1,11 +1,9 @@
-# Place this file at the ROOT of your repository (same level as solana_forge folder)
-
 [build]
-  # Point to the frontend directory
+  # This tells Netlify to change to the 'solana_forge' directory before running the build command.
   base = "solana_forge"
-  
-  # Build command (runs inside solana_forge)
-  command = "pnpm run build"
-  
-  # Publish directory (relative to base)
+
+  # This is the command to build your frontend application.
+  command = "pnpm run buildf"
+
+  # This is the directory that contains the built files, relative to the 'base' directory.
   publish = ".next"
