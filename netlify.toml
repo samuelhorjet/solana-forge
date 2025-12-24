@@ -1,0 +1,11 @@
+# Place this file at the ROOT of your repository (same level as solana_forge folder)
+
+[build]
+  # Point to the frontend directory
+  base = "solana_forge"
+  
+  # Build command (runs inside solana_forge)
+  command = "pnpm run build"
+  
+  # Publish directory (relative to base)
+  publish = ".next"
