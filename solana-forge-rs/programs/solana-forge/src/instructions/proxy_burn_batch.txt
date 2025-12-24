@@ -1,0 +1,64 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{TokenInterface};
+use dloom_locker::cpi::accounts::BurnFromWallet;
+use dloom_locker::program::DloomLocker;
+use crate::events::BatchBurnEvent;
+use crate::errors::ForgeError;
+
+#[derive(Accounts)]
+pub struct ProxyBurnBatch<'info> {
+    #[account(mut)]
+    pub burner: Signer<'info>,
+
+    pub locker_program: Program<'info, DloomLocker>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// CRITICAL FIX: We explicitly define the 'info lifetime here
+pub fn handle_proxy_burn_batch<'info>(
+    ctx: Context<'_, '_, '_, 'info, ProxyBurnBatch<'info>>, 
+    amounts: Vec<u64>
+) -> Result<()> {
+    let mut burned_mints = Vec::new();
+    let remaining_accs = ctx.remaining_accounts;
+
+    // Validation: Each burn needs a Mint and an ATA (2 accounts per amount)
+    if remaining_accs.len() != amounts.len() * 2 {
+        return err!(ForgeError::InvalidBatchAccounts);
+    }
+
+    for (i, amount) in amounts.iter().enumerate() {
+        // We clone the AccountInfo. This is cheap (just pointers) 
+        // and satisfies the lifetime requirement for the CPI struct.
+        let mint_info = remaining_accs[i * 2].clone();
+        let user_token_account_info = remaining_accs[i * 2 + 1].clone();
+
+        let cpi_accounts = BurnFromWallet {
+            burner: ctx.accounts.burner.to_account_info(),
+            token_mint: mint_info.clone(),
+            user_token_account: user_token_account_info,
+            token_program: ctx.accounts.token_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.locker_program.to_account_info(), 
+            cpi_accounts
+        );
+
+        // Execute CPI
+        dloom_locker::cpi::handle_burn_from_wallet(cpi_ctx, *amount)?;
+
+        // Store the mint pubkey for the event
+        burned_mints.push(mint_info.key());
+    }
+
+    // Emit the batch event
+    emit!(BatchBurnEvent {
+        burner: ctx.accounts.burner.key(),
+        mints: burned_mints,
+        amounts,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
+
+    Ok(())
+}

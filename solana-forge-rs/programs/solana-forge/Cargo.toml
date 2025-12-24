@@ -1,0 +1,33 @@
+[package]
+name = "solana-forge"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "solana_forge"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-spl/idl-build"]
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-spl = "0.32.1"
+mpl-token-metadata = { version = "5.1.1" }
+spl-token-2022 = { version = "9.0.0", features = ["no-entrypoint"] }
+dloom-locker = { version = "4.0.0", features = ["cpi"] }
+spl-token-metadata-interface = "0.8.0"
+solana-address = "2.0.0" 
+spl-pod = "0.7.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

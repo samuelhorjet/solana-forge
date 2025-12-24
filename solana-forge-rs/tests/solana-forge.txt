@@ -1,0 +1,248 @@
+// tests/solana-forge.ts
+
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { SolanaForge } from "../target/types/solana_forge";
+import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+  getMint,
+  MINT_SIZE, // We need this to calculate rent
+  createInitializeMintInstruction, // We need this instruction
+} from "@solana/spl-token";
+import {
+  PublicKey,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+} from "@solana/web3.js";
+import { assert } from "chai";
+
+// Public key for the Metaplex Token Metadata program
+const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+);
+
+describe("solana_forge", () => {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const program = anchor.workspace.SolanaForge as Program<SolanaForge>;
+  const authority = provider.wallet as anchor.Wallet;
+
+  const [userAccountPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user"), authority.publicKey.toBuffer()],
+    program.programId
+  );
+
+  // Keypairs for the mints
+  const standardTokenMint = anchor.web3.Keypair.generate();
+  const token2022Mint = anchor.web3.Keypair.generate();
+
+  it("Initializes the user account!", async () => {
+    try {
+      const tx = await program.methods
+        .initializeUser()
+        .accounts({
+          userAccount: userAccountPDA,
+          payer: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      console.log("Initialize user transaction signature", tx);
+      const userAccount = await program.account.userAccount.fetch(userAccountPDA);
+      assert.ok(userAccount.authority.equals(authority.publicKey));
+      assert.ok(userAccount.tokenCount.toNumber() === 0);
+      console.log("User account initialized successfully.");
+    } catch (error) {
+      if (error.toString().includes("already in use")) {
+        console.log("User account already initialized.");
+        return;
+      }
+      throw error;
+    }
+  });
+
+  it("Creates a token with the standard Token Program!", async () => {
+    const name = "Solana Forge Token";
+    const symbol = "SFT";
+    const uri = "https://raw.githubusercontent.com/solana-developers/program-examples/main/tokens/bld/assets/metadata.json";
+    const decimals = 9;
+    const initialSupply = new anchor.BN(1000 * 10 ** decimals);
+
+    const tokenAccount = await getAssociatedTokenAddress(
+      standardTokenMint.publicKey,
+      authority.publicKey,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+
+    const [metadataPDA] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("metadata"),
+        TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+        standardTokenMint.publicKey.toBuffer(),
+      ],
+      TOKEN_METADATA_PROGRAM_ID
+    );
+
+    // Get the minimum lamports for rent exemption for the mint account
+    const lamports = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+
+    console.log("\n--- Creating Standard Token ---");
+    console.log("Token Mint Address:", standardTokenMint.publicKey.toBase58());
+
+    const tx = await program.methods
+      .createToken(
+        name,
+        symbol,
+        uri,
+        decimals,
+        initialSupply,
+        { fungible: {} }
+      )
+      .accounts({
+        userAccount: userAccountPDA,
+        authority: authority.publicKey,
+        mint: standardTokenMint.publicKey,
+        tokenAccount: tokenAccount,
+        metadata: metadataPDA,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: SYSVAR_RENT_PUBKEY,
+        instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      // *** FIX IS HERE: Add instructions to create the mint account ***
+      .preInstructions([
+        // Instruction to create a new account with the system program
+        SystemProgram.createAccount({
+          fromPubkey: authority.publicKey,
+          newAccountPubkey: standardTokenMint.publicKey,
+          space: MINT_SIZE,
+          lamports,
+          programId: TOKEN_PROGRAM_ID,
+        }),
+        // Instruction to initialize that account as a mint
+        createInitializeMintInstruction(
+          standardTokenMint.publicKey,
+          decimals,
+          authority.publicKey,
+          null, // freeze authority
+          TOKEN_PROGRAM_ID
+        ),
+      ])
+      .signers([standardTokenMint]) // The mint keypair MUST sign for its own creation
+      .rpc({ skipPreflight: true });
+
+    console.log("Create standard token transaction signature:", tx);
+    console.log(`View on Solscan: https://solscan.io/tx/${tx}?cluster=devnet`);
+
+    // --- Verification ---
+    const mintInfo = await getMint(
+      provider.connection,
+      standardTokenMint.publicKey,
+      "confirmed",
+      TOKEN_PROGRAM_ID
+    );
+    assert.ok(
+      mintInfo.supply === BigInt(initialSupply.toString()),
+      "Mint supply is incorrect"
+    );
+    console.log("Standard token created and verified successfully!");
+  });
+
+  it("Creates a token with the Token-2022 Program!", async () => {
+    const name = "Solana Forge 2022 Token";
+    const symbol = "SFT22";
+    const uri = "https://raw.githubusercontent.com/solana-developers/program-examples/main/tokens/bld/assets/metadata.json";
+    const decimals = 6;
+    const initialSupply = new anchor.BN(5000 * 10 ** decimals);
+
+    const tokenAccount2022 = await getAssociatedTokenAddress(
+      token2022Mint.publicKey,
+      authority.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    const [metadataPDA2022] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("metadata"),
+        TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+        token2022Mint.publicKey.toBuffer(),
+      ],
+      TOKEN_METADATA_PROGRAM_ID
+    );
+    
+    // Get the minimum lamports for rent exemption for the mint account
+    const lamports = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+
+    console.log("\n--- Creating Token-2022 Token ---");
+    console.log("Token-2022 Mint Address:", token2022Mint.publicKey.toBase58());
+
+    const tx = await program.methods
+      .createToken(
+        name,
+        symbol,
+        uri,
+        decimals,
+        initialSupply,
+        { fungible2022: {} }
+      )
+      .accounts({
+        userAccount: userAccountPDA,
+        authority: authority.publicKey,
+        mint: token2022Mint.publicKey,
+        tokenAccount: tokenAccount2022,
+        metadata: metadataPDA2022,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: SYSVAR_RENT_PUBKEY,
+        instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      // *** FIX IS HERE: Add instructions to create the Token-2022 mint account ***
+      .preInstructions([
+        SystemProgram.createAccount({
+          fromPubkey: authority.publicKey,
+          newAccountPubkey: token2022Mint.publicKey,
+          space: MINT_SIZE,
+          lamports,
+          programId: TOKEN_2022_PROGRAM_ID,
+        }),
+        createInitializeMintInstruction(
+          token2022Mint.publicKey,
+          decimals,
+          authority.publicKey,
+          null,
+          TOKEN_2022_PROGRAM_ID
+        ),
+      ])
+      .signers([token2022Mint]) // The mint keypair MUST sign for its own creation
+      .rpc({ skipPreflight: true });
+
+    console.log("Create Token-2022 transaction signature:", tx);
+    console.log(`View on Solscan: https://solscan.io/tx/${tx}?cluster=devnet`);
+
+    // --- Verification ---
+    const userAccount = await program.account.userAccount.fetch(userAccountPDA);
+    console.log(`Final token count for user: ${userAccount.tokenCount.toNumber()}`);
+    assert.ok(userAccount.tokenCount.toNumber() >= 2, "Token count should be at least 2");
+
+    const mintInfo2022 = await getMint(
+      provider.connection,
+      token2022Mint.publicKey,
+      "confirmed",
+      TOKEN_2022_PROGRAM_ID
+    );
+    assert.ok(
+      mintInfo2022.supply === BigInt(initialSupply.toString()),
+      "Token-2022 mint supply is incorrect"
+    );
+    console.log("Token-2022 token created and verified successfully!");
+  });
+});

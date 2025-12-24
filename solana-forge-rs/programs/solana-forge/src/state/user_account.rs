@@ -1,0 +1,7 @@
+use anchor_lang::prelude::*;
+
+#[account]
+pub struct UserAccount {
+    pub authority: Pubkey,
+    pub token_count: u64,
+}
