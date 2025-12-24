@@ -1,6 +1,6 @@
 [build]
   base = "solana_forge"
-  command = "pnpm run buildf"
+  command = "pnpm run build"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
